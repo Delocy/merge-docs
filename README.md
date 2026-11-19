@@ -4,6 +4,7 @@
 
 - **comments on each pull request** with its API changes: endpoints added, removed or renamed, and fields added, removed, retyped, or made required
 - **publishes a searchable API catalogue** to GitHub Pages on every push to your default branch
+- **checks your dependencies live** on the catalogue's Dependencies page: latest version and licence from the [PyPI JSON API](https://docs.pypi.org/api/json/), and known security advisories for each pinned version from [OSV.dev](https://osv.dev). The page calls both APIs in the visitor's browser, so no key is needed.
 
 Nobody writes docs, and nobody digs through the codebase. Nothing is guessed: if the code doesn't declare a model, the catalogue says so. There's no AI, and your code is never run. It's read statically.
 
@@ -27,6 +28,10 @@ Add `docs/features/<path/to/router_module>.md` (for example `docs/features/app/r
 - Routes declared with `@router.get/post/put/patch/delete`, `@router.api_route(methods=[...])` and `router.add_api_route(...)`, including `APIRouter(prefix=...)` and `include_router(..., prefix=...)`, through relative imports and app factories
 - Request bodies and responses from Pydantic models (`response_model=` or the return annotation), with inheritance, `Optional`/`X | None`, `list[X]`, and nested models one level deep
 - Test files (`tests/`, `test_*.py`, `conftest.py`) are ignored
+
+## Dependencies page
+
+merge-docs reads `requirements.txt` and `[project].dependencies` in `pyproject.toml` at the repo root. Packages pinned with `==` are checked against OSV.dev; ranges like `>=1.0` show as "not pinned".
 
 ## Try it on past PRs first (free)
 

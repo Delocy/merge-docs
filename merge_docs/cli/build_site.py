@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 from merge_docs.core.contract import build_contracts
+from merge_docs.core.deps import read_dependencies
 from merge_docs.core.diff import diff_contracts
 from merge_docs.core.notes import notes_path
 from merge_docs.core.site import MergedChanges, build_site
@@ -25,7 +26,8 @@ def read_checkout(root: Path) -> dict[str, str]:
         rel = path.relative_to(root)
         if any(part in SKIP_DIRS for part in rel.parts) or not path.is_file():
             continue
-        if path.suffix == ".py" or (rel.parts[:2] == ("docs", "features") and path.suffix == ".md"):
+        if (path.suffix == ".py" or (rel.parts[:2] == ("docs", "features") and path.suffix == ".md")
+                or rel.as_posix() in ("requirements.txt", "pyproject.toml")):
             files[rel.as_posix()] = path.read_text(errors="replace")
     return files
 
@@ -63,9 +65,10 @@ def main(argv: list[str] | None = None) -> None:
     if token and args.changes > 0:
         from merge_docs.adapters.github_read import GitHubReader
         changes = merged_changes(args.repo, GitHubReader(token), args.changes, base=args.base)
-    written = build_site(contracts, notes, changes, args.repo, Path(args.out))
+    deps = read_dependencies(files)
+    written = build_site(contracts, notes, changes, args.repo, Path(args.out), deps=deps)
     print(f"Built {len(written)} files for {len(contracts)} feature(s) into {args.out}/ "
-          f"({len(changes)} merged PR(s) with API changes)")
+          f"({len(changes)} merged PR(s) with API changes, {len(deps)} dependencies)")
 
 
 if __name__ == "__main__":

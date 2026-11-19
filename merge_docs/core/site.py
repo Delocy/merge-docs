@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from merge_docs.core.contract import ModuleContract, Shape
+from merge_docs.core.deps import Dependency
 from merge_docs.core.diff import Change
 from merge_docs.core.notes import notes_path
 
@@ -99,7 +100,8 @@ def _layout(title: str, repo: str, body: str, depth: int = 0, active: str = "") 
     up = "../" * depth
     nav = "".join(
         f'<a href="{up}{href}"{" aria-current=\"page\"" if active == key else ""}>{label}</a>'
-        for key, href, label in [("search", "index.html", "Catalogue"), ("changes", "changes.html", "API changes")]
+        for key, href, label in [("search", "index.html", "Catalogue"), ("changes", "changes.html", "API changes"),
+                                 ("deps", "dependencies.html", "Dependencies")]
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -168,6 +170,11 @@ pre { overflow-x:auto; background: var(--bg); padding: .7rem; border-radius: 6px
 .pr h2 { font-family: var(--sans); font-size: 1rem; }
 .pr ul { margin: .5rem 0 0; padding-left: 1.2rem; font-size: .92rem; }
 footer { padding-block: 0 2.5rem; font-size: .85rem; }
+.badge { display:inline-block; font: 600 .75rem var(--sans); padding: .1rem .45rem; border-radius: 999px; border:1px solid var(--rule); white-space: nowrap; }
+.badge.ok { color: var(--get); border-color: currentColor; } .badge.warn { color: var(--put); border-color: currentColor; }
+.badge.bad { color: var(--delete); border-color: currentColor; } .badge.none { color: var(--muted); }
+.vulns { margin: .25rem 0 0; padding-left: 1rem; font-size: .85rem; }
+#deps-status { min-height: 1.5em; }
 """
 
 JS = """
@@ -198,7 +205,7 @@ JS = """
 
 
 def build_site(contracts: dict[str, ModuleContract], notes: dict[str, str], changes: list[MergedChanges],
-               repo: str, out_dir: Path) -> list[Path]:
+               repo: str, out_dir: Path, deps: list[Dependency] | None = None) -> list[Path]:
     out = Path(out_dir)
     (out / "features").mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
@@ -217,6 +224,21 @@ def build_site(contracts: dict[str, ModuleContract], notes: dict[str, str], chan
     write("search.json", json.dumps(index, indent=1))
     write("style.css", CSS)
     write("search.js", JS)
+    write("deps.js", DEPS_JS)
+    write("deps.json", json.dumps([{"name": d.name, "version": d.version, "spec": d.spec, "source": d.source}
+                                   for d in deps or []], indent=1))
+    write("dependencies.html", _layout(f"Dependencies · {repo}", repo, f"""
+<h1>Dependencies</h1>
+<p class="muted">The Python packages <code>{_e(repo)}</code> depends on, checked live when you open this page:
+latest version and licence from the <a href="https://pypi.org">PyPI</a> JSON API, known security advisories
+for the pinned version from the <a href="https://osv.dev">OSV.dev</a> vulnerability database.</p>
+<p id="deps-status" class="muted" aria-live="polite">Checking {len(deps or [])} package(s)…</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Package</th><th>Your version</th><th>Latest on PyPI</th><th>Licence</th><th>Security (OSV.dev)</th></tr></thead>
+<tbody id="deps"></tbody></table></div>
+<noscript><p>Turn on JavaScript to check versions and advisories. The list comes from <a href="deps.json">deps.json</a>.</p></noscript>
+<script src="deps.js"></script>
+""", active="deps"))
 
     static_list = "".join(
         f'<li><a href="features/{_e(page_name(c.slug))}">{_e(c.slug)}</a><div class="eps">'
@@ -262,3 +284,92 @@ def build_site(contracts: dict[str, ModuleContract], notes: dict[str, str], chan
 {''.join(prs) or '<p class="muted">No merged PRs with API changes yet.</p>'}
 """, active="changes"))
     return written
+
+
+DEPS_JS = r"""
+(function () {
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  function licence(info) {
+    const text = info.license_expression || info.license || '';
+    if (text && text.length <= 40) return text;
+    const classifier = (info.classifiers || []).find(c => c.startsWith('License ::'));
+    return classifier ? classifier.split(' :: ').pop() : (text ? text.slice(0, 37) + '…' : 'unknown');
+  }
+
+  // dep: {name, version, spec}; pypi: PyPI JSON or null; vulnIds: array of OSV ids, or null when not checked.
+  function rowModel(dep, pypi, vulnIds) {
+    const latest = pypi ? pypi.info.version : 'unavailable';
+    const files = pypi && pypi.releases && pypi.releases[latest];
+    const status = !dep.version ? 'not pinned' : !pypi ? 'unknown' : dep.version === latest ? 'up to date' : 'update available';
+    return {
+      name: dep.name, version: dep.version, spec: dep.spec, latest, status,
+      released: files && files.length ? String(files[0].upload_time).slice(0, 10) : '',
+      license: pypi ? licence(pypi.info) : '',
+      vulns: vulnIds,
+    };
+  }
+
+  function renderRow(m) {
+    const statusClass = {'up to date': 'ok', 'update available': 'warn', 'not pinned': 'none', 'unknown': 'none'}[m.status];
+    let security;
+    if (m.vulns === null) {
+      security = '<span class="badge none">' + (m.version ? 'not checked' : 'pin a version to check') + '</span>';
+    } else if (!m.vulns.length) {
+      security = '<span class="badge ok">none known</span>';
+    } else {
+      const shown = m.vulns.slice(0, 3).map(id =>
+        '<li><a href="https://osv.dev/vulnerability/' + encodeURIComponent(id) + '">' + esc(id) + '</a></li>').join('');
+      security = '<span class="badge bad">' + m.vulns.length + ' advisor' + (m.vulns.length === 1 ? 'y' : 'ies') + '</span>' +
+        '<ul class="vulns">' + shown + (m.vulns.length > 3 ? '<li class="muted">+' + (m.vulns.length - 3) + ' more</li>' : '') + '</ul>';
+    }
+    return '<tr><td><a href="https://pypi.org/project/' + encodeURIComponent(m.name) + '/"><code>' + esc(m.name) + '</code></a></td>' +
+      '<td><code>' + esc(m.version || m.spec) + '</code></td>' +
+      '<td><code>' + esc(m.latest) + '</code>' + (m.released ? ' <span class="muted">' + esc(m.released) + '</span>' : '') +
+      ' <span class="badge ' + statusClass + '">' + esc(m.status) + '</span></td>' +
+      '<td>' + esc(m.license) + '</td><td>' + security + '</td></tr>';
+  }
+
+  async function pypi(name) {
+    try {
+      const r = await fetch('https://pypi.org/pypi/' + encodeURIComponent(name) + '/json');
+      return r.ok ? await r.json() : null;
+    } catch (e) { return null; }
+  }
+
+  async function osv(pinned) {
+    if (!pinned.length) return [];
+    const r = await fetch('https://api.osv.dev/v1/querybatch', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({queries: pinned.map(d => ({package: {name: d.name, ecosystem: 'PyPI'}, version: d.version}))}),
+    });
+    if (!r.ok) throw new Error('OSV.dev answered ' + r.status);
+    return (await r.json()).results.map(x => (x.vulns || []).map(v => v.id));
+  }
+
+  async function load() {
+    const status = document.getElementById('deps-status');
+    const body = document.getElementById('deps');
+    let deps;
+    try { deps = await (await fetch('deps.json')).json(); } catch (e) { status.textContent = 'Could not load the dependency list.'; return; }
+    if (!deps.length) { status.textContent = 'No requirements.txt or pyproject.toml dependencies found in this repo.'; return; }
+    const pinned = deps.filter(d => d.version);
+    const [infos, advisories] = await Promise.all([
+      Promise.all(deps.map(d => pypi(d.name))),
+      osv(pinned).then(list => list, () => null),
+    ]);
+    const byName = {};
+    if (advisories) pinned.forEach((d, i) => { byName[d.name] = advisories[i]; });
+    const models = deps.map((d, i) => rowModel(d, infos[i], d.version && advisories ? byName[d.name] : null));
+    body.innerHTML = models.map(renderRow).join('');
+    const vulnerable = models.filter(m => m.vulns && m.vulns.length).length;
+    const outdated = models.filter(m => m.status === 'update available').length;
+    status.textContent = 'Checked ' + deps.length + ' package(s) just now: ' + vulnerable + ' with known advisories, ' +
+      outdated + ' with a newer version.' + (advisories ? '' : ' OSV.dev could not be reached, so advisories were not checked.') +
+      (infos.some(x => !x) ? ' Some packages could not be found on PyPI.' : '');
+  }
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = {rowModel, renderRow, esc};
+  else load();
+})();
+"""
