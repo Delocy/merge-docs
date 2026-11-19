@@ -12,7 +12,9 @@ from typing import Any, Literal
 
 import httpx
 
+from merge_docs.adapters.osv import query_advisories
 from merge_docs.core.contract import build_contracts
+from merge_docs.core.deps import DepFinding, changed_dependencies, read_dependencies
 from merge_docs.core.diff import diff_contracts
 from merge_docs.core.notes import notes_path, stale_mentions
 from merge_docs.core.render import MARKER, render_comment
@@ -30,7 +32,18 @@ def _code(files: dict[str, str]) -> dict[str, str]:
     return {p: t for p, t in files.items() if p.endswith(".py")}
 
 
-def build_comment(repo: str, pr: int, gh: Any, had_changes_before: bool) -> str | None:
+def check_dependencies(base_files: dict[str, str], head_files: dict[str, str], advisories) -> tuple[list[DepFinding], bool]:
+    changed = changed_dependencies(read_dependencies(base_files), read_dependencies(head_files))
+    if not changed:
+        return [], False
+    try:
+        found = advisories([d for d, _ in changed])
+    except (httpx.HTTPError, KeyError, ValueError):
+        return [], True
+    return [DepFinding(d, change, tuple(found.get(d.name, []))) for d, change in changed if found.get(d.name)], False
+
+
+def build_comment(repo: str, pr: int, gh: Any, had_changes_before: bool, advisories=query_advisories) -> str | None:
     base, head = gh.base_and_head(repo, pr)
     base_files = gh.snapshot(repo, base)
     head_files = base_files if head == base else gh.snapshot(repo, head)
@@ -38,14 +51,15 @@ def build_comment(repo: str, pr: int, gh: Any, had_changes_before: bool) -> str 
     new = build_contracts(_code(head_files), repo)
     changes = diff_contracts(old, new)
     stale = {m: stale_mentions(head_files[notes_path(m)], new, old) for m in new if notes_path(m) in head_files}
-    return render_comment(changes, stale, had_changes_before)
+    findings, osv_error = check_dependencies(base_files, head_files, advisories)
+    return render_comment(changes, stale, had_changes_before, dep_findings=findings, osv_error=osv_error)
 
 
-def run(repo: str, pr: int, gh: Any) -> Outcome:
+def run(repo: str, pr: int, gh: Any, advisories=query_advisories) -> Outcome:
     # Only our own comment counts: anyone can post a comment that starts with the marker.
     existing = next((c for c in gh.issue_comments(repo, pr)
                      if c["body"].startswith(MARKER) and c.get("user") == BOT_LOGIN), None)
-    body = build_comment(repo, pr, gh, had_changes_before=existing is not None)
+    body = build_comment(repo, pr, gh, had_changes_before=existing is not None, advisories=advisories)
     if body is None:
         return "skipped"
     if existing is None:

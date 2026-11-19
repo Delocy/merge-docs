@@ -54,3 +54,25 @@ def read_dependencies(files: dict[str, str]) -> list[Dependency]:
             if dep and dep.name not in found:  # an exact pin in requirements.txt wins
                 found[dep.name] = dep
     return sorted(found.values(), key=lambda d: d.name)
+
+
+@dataclass(frozen=True)
+class DepFinding:
+    dep: Dependency
+    change: str  # "added", "changed from 1.2.3", or "newly pinned"
+    advisories: tuple[str, ...]  # OSV ids
+
+
+def changed_dependencies(old: list[Dependency], new: list[Dependency]) -> list[tuple[Dependency, str]]:
+    """Pinned dependencies a change adds or re-pins. Only these have an exact version to check."""
+    before = {d.name: d for d in old}
+    out = []
+    for d in new:
+        if d.version is None:
+            continue
+        prev = before.get(d.name)
+        if prev is None:
+            out.append((d, "added"))
+        elif prev.version != d.version:
+            out.append((d, f"changed from {prev.version}" if prev.version else "newly pinned"))
+    return out

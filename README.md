@@ -3,6 +3,7 @@
 **Your FastAPI contracts, documented automatically.** merge-docs reads every endpoint's request and response models straight from the code. Then it:
 
 - **comments on each pull request** with its API changes: endpoints added, removed or renamed, and fields added, removed, retyped, or made required
+- **flags risky new dependencies** in the same comment: any package a PR adds or re-pins that has known security advisories on [OSV.dev](https://osv.dev)
 - **publishes a searchable API catalogue** to GitHub Pages on every push to your default branch
 - **checks your dependencies live** on the catalogue's Dependencies page: latest version and licence from the [PyPI JSON API](https://docs.pypi.org/api/json/), and known security advisories for each pinned version from [OSV.dev](https://osv.dev). The page calls both APIs in the visitor's browser, so no key is needed.
 

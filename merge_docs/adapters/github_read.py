@@ -18,7 +18,8 @@ class ChangedFile:
 
 
 def _keep(path: str) -> bool:
-    return path.endswith(".py") or (path.startswith("docs/features/") and path.endswith(".md"))
+    return (path.endswith(".py") or (path.startswith("docs/features/") and path.endswith(".md"))
+            or path in ("requirements.txt", "pyproject.toml"))
 
 
 class GitHubReader:
