@@ -50,4 +50,6 @@ runs:
     - name: Unknown command
       if: inputs.command != 'pr-comment' && inputs.command != 'build-site'
       shell: bash
-      run: echo "merge-docs: command must be pr-comment or build-site" >&2 && exit 1
+      run: |
+        echo "merge-docs: command must be pr-comment or build-site" >&2
+        exit 1
