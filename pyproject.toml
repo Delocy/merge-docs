@@ -1,0 +1,23 @@
+[project]
+name = "merge-docs"
+version = "0.1.0"
+description = "Reads FastAPI API contracts from code, comments PRs with API changes, and serves a searchable catalogue."
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.7",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["merge_docs"]

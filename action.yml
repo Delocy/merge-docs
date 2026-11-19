@@ -1,0 +1,53 @@
+name: merge-docs
+description: Read FastAPI API contracts from code. Comment API changes on pull requests, or build a static API catalogue for GitHub Pages.
+branding:
+  icon: book-open
+  color: green
+
+inputs:
+  command:
+    description: "pr-comment (on pull_request) or build-site (on push to the default branch)"
+    required: true
+  token:
+    description: "Token for the GitHub API. The workflow's token is enough."
+    default: ${{ github.token }}
+  out:
+    description: "build-site: output folder for the static site"
+    default: site
+  changes:
+    description: "build-site: how many recent merged PRs to show on the API changes page"
+    default: "10"
+  repo-dir:
+    description: "build-site: folder of the checked-out repo"
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install merge-docs
+      shell: bash
+      run: python -m pip install --quiet "$ACTION_PATH"
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+    - name: Comment API changes
+      if: inputs.command == 'pr-comment'
+      shell: bash
+      run: python -m merge_docs.cli.pr_comment
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+    - name: Build the API catalogue
+      if: inputs.command == 'build-site'
+      shell: bash
+      run: python -m merge_docs.cli.build_site --repo-dir "$REPO_DIR" --repo "$GITHUB_REPOSITORY" --out "$OUT" --changes "$CHANGES"
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        REPO_DIR: ${{ inputs.repo-dir }}
+        OUT: ${{ inputs.out }}
+        CHANGES: ${{ inputs.changes }}
+    - name: Unknown command
+      if: inputs.command != 'pr-comment' && inputs.command != 'build-site'
+      shell: bash
+      run: echo "merge-docs: command must be pr-comment or build-site" >&2 && exit 1
